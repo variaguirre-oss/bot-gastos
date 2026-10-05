@@ -1,0 +1,19 @@
+{
+  "name": "bot-gastos-whatsapp",
+  "version": "1.0.0",
+  "description": "Bot de WhatsApp para llevar el control de gastos familiares en Google Sheets",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test-parser.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "googleapis": "^144.0.0"
+  }
+}
