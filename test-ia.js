@@ -106,4 +106,29 @@ const ctx = (cliente, persona = 'Alvaro') => ({ persona, ahora: '2026-10-05 16:4
   console.log('✓ memoria por persona');
 }
 
+// 6) Categoría libre + lista de varios gastos en un solo mensaje
+{
+  const c = clienteFalso([
+    {
+      stop_reason: 'tool_use',
+      content: [
+        { type: 'tool_use', id: 'a', name: 'registrar_gasto', input: { monto: 61.73, categoria: 'Labels', descripcion: 'datejust rosa (Stellar)' } },
+        { type: 'tool_use', id: 'b', name: 'registrar_gasto', input: { monto: 46.95, categoria: 'labels', descripcion: 'strap sevando (Vari)' } },
+      ],
+    },
+    decir('Registré 2 gastos en labels.'),
+  ]);
+  await conversar('Labels de stellar 61.73 datejust rosa ... todo va en Labels', ctx(c));
+  const ultimos = filas.slice(-2);
+  assert.deepEqual(ultimos.map((g) => g.categoria), ['labels', 'labels']);
+  assert.equal(c.llamadas[1].messages.at(-1).content.length, 2);
+  // La categoría nueva ya aparece en las instrucciones del siguiente mensaje
+  const c2 = clienteFalso([usar('t7', 'buscar_gastos', { categoria: 'Labels' }), decir('ok')]);
+  await conversar('¿cuánto llevamos en labels?', ctx(c2));
+  assert.match(c2.llamadas[0].system, /labels/);
+  const res = JSON.parse(c2.llamadas[1].messages.at(-1).content[0].content);
+  assert.equal(res.total, 108.68);
+  console.log('✓ categorías libres y lista de gastos, total labels', res.total);
+}
+
 console.log('\nTodas las pruebas pasaron ✅');

@@ -31,8 +31,12 @@ const HERRAMIENTAS = [
       type: 'object',
       properties: {
         monto: { type: 'number', description: 'Monto en pesos, positivo.' },
-        categoria: { type: 'string', enum: CATEGORIAS },
-        descripcion: { type: 'string', description: 'Descripción breve, ej. "tacos", "plomero".' },
+        categoria: {
+          type: 'string',
+          description:
+            'Categoría en minúsculas. Usa una de las categorías existentes si encaja; si el usuario pide una nueva (ej. "labels"), úsala tal cual.',
+        },
+        descripcion: { type: 'string', description: 'Descripción breve, ej. "tacos", "datejust rosa (Stellar)".' },
         fecha: {
           type: 'string',
           description: 'Fecha del gasto YYYY-MM-DD. Omitir si fue hoy.',
@@ -51,7 +55,7 @@ const HERRAMIENTAS = [
         desde: { type: 'string', description: 'Fecha inicial YYYY-MM-DD (incluida).' },
         hasta: { type: 'string', description: 'Fecha final YYYY-MM-DD (incluida).' },
         persona: { type: 'string', description: 'Nombre de la persona, si se pregunta por alguien.' },
-        categoria: { type: 'string', enum: CATEGORIAS },
+        categoria: { type: 'string', description: 'Categoría exacta a filtrar.' },
         texto: { type: 'string', description: 'Palabra a buscar en la descripción.' },
       },
     },
@@ -64,7 +68,7 @@ const HERRAMIENTAS = [
       properties: {
         id: { type: 'integer' },
         campo: { type: 'string', enum: ['monto', 'categoria', 'descripcion', 'fecha'] },
-        valor: { type: 'string', description: 'Nuevo valor. Fecha en YYYY-MM-DD; categoría de la lista.' },
+        valor: { type: 'string', description: 'Nuevo valor. Fecha en YYYY-MM-DD; categoría en minúsculas.' },
       },
       required: ['id', 'campo', 'valor'],
     },
@@ -81,16 +85,19 @@ const HERRAMIENTAS = [
   },
 ];
 
-function instrucciones({ persona, ahora, personas }) {
-  return `Eres el asistente de gastos por WhatsApp de una familia/sociedad en México. Hablas en español mexicano, amable y breve.
+function instrucciones({ persona, ahora, personas, categorias }) {
+  return `Eres el asistente de gastos por WhatsApp de un pequeño negocio/sociedad en México. Hablas en español mexicano, amable y breve.
 
 Hoy es ${ahora} (zona horaria de México). Te escribe: ${persona}.
 Personas que usan el bot: ${personas.join(', ')}.
-Categorías válidas: ${CATEGORIAS.join(', ')}.
+Categorías que ya existen: ${categorias.join(', ')}.
 
 Reglas:
 - NUNCA inventes cifras. Para cualquier total, suma o comparación usa buscar_gastos y reporta los números que devuelve.
 - Si el usuario dice que gastó algo, regístralo con registrar_gasto. Si el monto no está claro, pregunta antes de registrar.
+- Las categorías son libres: si el usuario indica una categoría (aunque no exista), úsala en minúsculas sin cuestionarla. Si no indica ninguna, elige la existente que mejor encaje.
+- Si mandan una lista de varios gastos, registra cada renglón por separado (puedes llamar registrar_gasto varias veces) y al final confirma con un resumen y el total.
+- Si un encabezado agrupa renglones (ej. "Labels de Stellar"), incluye ese contexto en la descripción de cada gasto (ej. "datejust rosa (Stellar)").
 - Interpreta fechas relativas ("ayer", "el lunes", "la semana pasada", "septiembre") con base en la fecha de hoy. Las semanas empiezan en lunes.
 - Para corregir o borrar, primero busca el gasto para obtener su id. Si hay varios posibles, pregunta cuál.
 - Montos en pesos con formato $1,234.50.
@@ -109,7 +116,7 @@ function filtrar(gastos, { desde, hasta, persona, categoria, texto }) {
     if (desde && dia < desde) return false;
     if (hasta && dia > hasta) return false;
     if (persona && !norm(g.persona).includes(norm(persona))) return false;
-    if (categoria && g.categoria !== categoria) return false;
+    if (categoria && norm(g.categoria) !== norm(categoria)) return false;
     if (texto && !norm(g.descripcion).includes(norm(texto))) return false;
     return true;
   });
@@ -121,6 +128,11 @@ function totales(gastos, clave) {
   return m;
 }
 
+export function limpiarCategoria(c) {
+  const t = String(c || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 40);
+  return t || 'otros';
+}
+
 const esFecha = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '');
 
 async function ejecutar(nombre, input, ctx) {
@@ -129,7 +141,7 @@ async function ejecutar(nombre, input, ctx) {
     case 'registrar_gasto': {
       const monto = Number(input.monto);
       if (!(monto > 0)) return { error: 'Monto inválido' };
-      const categoria = CATEGORIAS.includes(input.categoria) ? input.categoria : 'otros';
+      const categoria = limpiarCategoria(input.categoria);
       const hoy = ahora.slice(0, 10);
       const fecha = esFecha(input.fecha) && input.fecha !== hoy ? `${input.fecha} 12:00` : ahora;
       await datos.agregarGasto({
@@ -167,7 +179,9 @@ async function ejecutar(nombre, input, ctx) {
         valor = Number(String(valor).replace(/[$,]/g, ''));
         if (!(valor > 0)) return { error: 'Monto inválido' };
       }
-      if (input.campo === 'categoria' && !CATEGORIAS.includes(valor)) return { error: 'Categoría inválida' };
+      if (input.campo === 'categoria') {
+        valor = limpiarCategoria(valor);
+      }
       if (input.campo === 'fecha') {
         if (!esFecha(valor)) return { error: 'Fecha debe ser YYYY-MM-DD' };
         valor = `${valor} ${g.fecha.slice(11, 16) || '12:00'}`;
@@ -195,12 +209,18 @@ export async function conversar(texto, ctx) {
   const claude = ctx.cliente || getCliente();
   const hist = historial(ctx.persona);
   const mensajes = [...hist, { role: 'user', content: texto }];
+  let existentes = [];
+  try {
+    existentes = (await ctx.datos.leerGastos()).map((g) => g.categoria);
+  } catch {}
+  const categorias = [...new Set([...CATEGORIAS, ...existentes.filter(Boolean)])];
+  const sistema = instrucciones({ ...ctx, categorias });
 
   for (let paso = 0; paso < MAX_PASOS; paso++) {
     const r = await claude.messages.create({
       model: MODELO,
       max_tokens: 1024,
-      system: instrucciones(ctx),
+      system: sistema,
       tools: HERRAMIENTAS,
       messages: mensajes,
     });

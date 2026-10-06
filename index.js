@@ -119,8 +119,11 @@ async function responderComando(comando, persona) {
   switch (comando) {
     case 'ayuda':
       return ayuda();
-    case 'categorias':
-      return `*Categorías:*\n${CATEGORIAS.map((c) => `• ${c}`).join('\n')}\n\nSi no pones categoría, se guarda como _otros_.`;
+    case 'categorias': {
+      const usadas = (await leerGastos()).map((g) => g.categoria).filter(Boolean);
+      const todas = [...new Set([...usadas, ...CATEGORIAS])];
+      return `*Categorías:*\n${todas.map((c) => `• ${c}`).join('\n')}\n\nPuedes usar cualquier categoría nueva, ej. _300 labels vari_.\nSi no pones categoría, se guarda como _otros_.`;
+    }
     case 'hoy': {
       const gastos = (await leerGastos()).filter((g) => g.fecha.startsWith(hoyStr()));
       return resumir(gastos, `Gastos de hoy (${hoyStr()})`);
@@ -172,6 +175,15 @@ async function procesarMensaje(texto, persona) {
   }
 
   if (r.tipo === 'gasto') {
+    // Categorías propias (ej. "300 labels vari"): si la primera palabra ya se usó como categoría, se respeta.
+    if (r.categoria === 'otros' && r.descripcion) {
+      const [primera, ...resto] = r.descripcion.split(/\s+/);
+      const usadas = new Set((await leerGastos()).map((g) => String(g.categoria).toLowerCase()));
+      if (usadas.has(primera.toLowerCase())) {
+        r.categoria = primera.toLowerCase();
+        r.descripcion = resto.join(' ');
+      }
+    }
     await agregarGasto({
       fecha: ahora(),
       persona,
