@@ -10,6 +10,7 @@ export const CAMPOS = [
   ['registro', 'Registró'],
   ['proveedor', 'Comprado a'],
   ['modelo', 'Modelo'],
+  ['anio', 'Año'],
   ['numero_serie', 'No. serie'],
   ['costo', 'Costo'],
   ['moneda_costo', 'Moneda costo'],
@@ -23,7 +24,6 @@ export const CAMPOS = [
   ['moneda_ganancia', 'Moneda ganancia'],
   ['vendio', 'Vendió'],
   ['notas', 'Notas'],
-  ['anio', 'Año'], // al final para no mover columnas existentes
 ];
 const COL_FIN = String.fromCharCode(64 + CAMPOS.length); // última columna (S)
 const NUMERICOS = new Set(['costo', 'precio_venta', 'tipo_cambio', 'ganancia']);
@@ -56,15 +56,43 @@ export async function prepararInventario() {
     pestaña = { properties: r.data.replies[0].addSheet.properties };
   }
   sheetIdNumerico = pestaña.properties.sheetId;
-  const actual = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID(), range: `${HOJA}!A1:${COL_FIN}1` });
-  if ((actual.data.values?.[0] || []).length < CAMPOS.length) {
+  const leerEncabezado = async () =>
+    (await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID(), range: `${HOJA}!A1:Z1` })).data.values?.[0] || [];
+
+  // Acomoda columnas de versiones anteriores sin perder datos.
+  const accion = planMigracion(await leerEncabezado());
+  if (accion) {
+    const columnas = (inicio) => ({ sheetId: sheetIdNumerico, dimension: 'COLUMNS', startIndex: inicio, endIndex: inicio + 1 });
+    const request =
+      accion.tipo === 'mover'
+        ? { moveDimension: { source: columnas(accion.desde), destinationIndex: accion.hacia } }
+        : { insertDimension: { range: columnas(accion.hacia), inheritFromBefore: true } };
+    await sheets.spreadsheets.batchUpdate({ spreadsheetId: SPREADSHEET_ID(), requestBody: { requests: [request] } });
+    console.log(`Inventario: columna "Año" ${accion.tipo === 'mover' ? 'movida' : 'insertada'} a la posición ${accion.hacia + 1}`);
+  }
+
+  const actual = await leerEncabezado();
+  const esperado = CAMPOS.map(([, titulo]) => titulo);
+  if (esperado.some((t, i) => actual[i] !== t)) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID(),
       range: `${HOJA}!A1:${COL_FIN}1`,
       valueInputOption: 'RAW',
-      requestBody: { values: [CAMPOS.map(([, titulo]) => titulo)] },
+      requestBody: { values: [esperado] },
     });
   }
+}
+
+// Decide si hay que mover/insertar la columna "Año" para que quede junto a "Modelo".
+export function planMigracion(encabezado) {
+  if (encabezado.length === 0) return null; // hoja nueva
+  const destino = CAMPOS.findIndex(([k]) => k === 'anio');
+  const actual = encabezado.indexOf('Año');
+  if (actual === destino) return null;
+  if (actual !== -1) return { tipo: 'mover', desde: actual, hacia: destino };
+  // Versión sin año: inserta una columna vacía en su lugar.
+  if (encabezado[destino] === 'No. serie') return { tipo: 'insertar', hacia: destino };
+  return null;
 }
 
 function aFila(reloj) {

@@ -2,6 +2,22 @@
 import assert from 'node:assert/strict';
 import { ejecutarInventario, calcularGanancia } from './inventario-ia.js';
 import { conversar } from './ai.js';
+import { CAMPOS, planMigracion } from './inventario.js';
+
+// 0) Migración de columnas: "Año" pasa de la columna S a la F (junto a Modelo)
+{
+  const nuevo = CAMPOS.map(([, t]) => t);
+  assert.equal(nuevo[4], 'Modelo');
+  assert.equal(nuevo[5], 'Año');
+  const viejo = [...nuevo.filter((t) => t !== 'Año'), 'Año'];
+  const plan = planMigracion(viejo);
+  assert.deepEqual(plan, { tipo: 'mover', desde: 18, hacia: 5 });
+  const m = [...viejo];
+  m.splice(plan.hacia, 0, m.splice(plan.desde, 1)[0]);
+  assert.deepEqual(m, nuevo);
+  assert.equal(planMigracion(nuevo), null);
+  console.log('✓ migración de columna Año');
+}
 
 // --- Inventario en memoria con la misma interfaz que inventario.js ---
 let filas = [];
