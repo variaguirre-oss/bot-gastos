@@ -21,6 +21,7 @@ export const HERRAMIENTAS_INVENTARIO = [
       properties: {
         modelo: { type: 'string', description: 'Marca, modelo y variante tal como lo dice el usuario, ej. "Rolex Datejust 36 esfera verde".' },
         numero_serie: { type: 'string', description: 'Número de serie. Si el usuario no lo tiene, omítelo.' },
+        anio: { type: 'string', description: 'Año del reloj, ej. "2019" o "aprox. 2015". Omitir si no se sabe.' },
         costo: { type: 'number', description: 'Cuánto costó la pieza.' },
         moneda: { type: 'string', enum: MONEDAS },
         proveedor: { type: 'string', description: 'A quién se le compró.' },
@@ -60,7 +61,7 @@ export const HERRAMIENTAS_INVENTARIO = [
       type: 'object',
       properties: {
         estado: { type: 'string', enum: ['en inventario', 'vendido', 'todos'], description: 'Por defecto "todos".' },
-        texto: { type: 'string', description: 'Busca en modelo, número de serie y notas.' },
+        texto: { type: 'string', description: 'Busca en modelo, año, número de serie y notas.' },
         proveedor: { type: 'string' },
         cliente: { type: 'string' },
         desde: { type: 'string', description: 'YYYY-MM-DD. Filtra por fecha de compra, o de venta si estado="vendido".' },
@@ -77,7 +78,7 @@ export const HERRAMIENTAS_INVENTARIO = [
         id: { type: 'string' },
         campo: {
           type: 'string',
-          enum: ['modelo', 'numero_serie', 'costo', 'moneda_costo', 'proveedor', 'fecha_compra', 'notas', 'cliente', 'precio_venta', 'moneda_venta', 'fecha_venta', 'tipo_cambio'],
+          enum: ['modelo', 'anio', 'numero_serie', 'costo', 'moneda_costo', 'proveedor', 'fecha_compra', 'notas', 'cliente', 'precio_venta', 'moneda_venta', 'fecha_venta', 'tipo_cambio'],
         },
         valor: { type: 'string' },
       },
@@ -98,7 +99,8 @@ export const HERRAMIENTAS_INVENTARIO = [
 
 export const INSTRUCCIONES_INVENTARIO = `
 INVENTARIO DE RELOJES (pestaña aparte, una fila por pieza con ID tipo R-0001):
-- Compra ("compré un Datejust 36 verde a Pedro en 120 mil pesos, serie 7XK92..."): usa registrar_compra_reloj. Necesitas modelo, costo, moneda y a quién se le compró; pide lo que falte. Pide también el número de serie si no lo dieron (si el usuario dice que no lo tiene, regístralo sin serie).
+- Compra ("compré un Datejust 36 verde a Pedro en 120 mil pesos, serie 7XK92..."): usa registrar_compra_reloj. Necesitas modelo, costo, moneda y a quién se le compró; pide lo que falte. Si no dieron número de serie o año, pídelos en una sola pregunta (si el usuario dice que no los tiene, regístralo sin ellos).
+- El año del reloj va en el campo "anio" (no en el modelo ni en notas). Ej: "Datejust 2019" → modelo "Datejust", anio "2019".
 - Venta ("vendí el Datejust verde a Luis en 150 mil"): primero buscar_relojes en inventario para identificar la pieza. Si hay más de una que coincide, pregunta cuál (muestra ID, modelo y serie). Luego registrar_venta_reloj.
 - Si la venta es en otra moneda que la compra, PREGUNTA el tipo de cambio (pesos por dólar) antes de registrar. Nunca lo inventes.
 - La ganancia la calcula el sistema; repórtala tal como la devuelve la herramienta.
@@ -174,6 +176,7 @@ export async function ejecutarInventario(nombre, input, { inv, persona, ahora })
         registro: persona,
         proveedor: input.proveedor || '',
         modelo: input.modelo,
+        anio: input.anio ? String(input.anio).trim() : '',
         numero_serie: input.numero_serie || '',
         costo,
         moneda_costo: input.moneda,
@@ -220,7 +223,7 @@ export async function ejecutarInventario(nombre, input, { inv, persona, ahora })
         if (estado !== 'todos' && r.estado !== estado) return false;
         if (input.texto) {
           const t = norm(input.texto);
-          const hay = norm(`${r.id} ${r.modelo} ${r.notas}`).includes(t) || normSerie(r.numero_serie).includes(normSerie(input.texto));
+          const hay = norm(`${r.id} ${r.modelo} ${r.anio} ${r.notas}`).includes(t) || normSerie(r.numero_serie).includes(normSerie(input.texto));
           if (!hay) return false;
         }
         if (input.proveedor && !norm(r.proveedor).includes(norm(input.proveedor))) return false;

@@ -23,8 +23,9 @@ export const CAMPOS = [
   ['moneda_ganancia', 'Moneda ganancia'],
   ['vendio', 'Vendió'],
   ['notas', 'Notas'],
+  ['anio', 'Año'], // al final para no mover columnas existentes
 ];
-const COL_FIN = String.fromCharCode(64 + CAMPOS.length); // 'R'
+const COL_FIN = String.fromCharCode(64 + CAMPOS.length); // última columna (S)
 const NUMERICOS = new Set(['costo', 'precio_venta', 'tipo_cambio', 'ganancia']);
 
 export const EN_INVENTARIO = 'en inventario';

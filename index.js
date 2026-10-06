@@ -100,7 +100,7 @@ Ej: _¿quién ha gastado más esta semana?_
 Ej: _el último no era comida, era transporte_
 
 *Inventario de relojes* ⌚
-Ej: _compré un Datejust 36 verde a Pedro en 120 mil pesos, serie 7XK92A1_
+Ej: _compré un Datejust 36 verde 2019 a Pedro en 120 mil pesos, serie 7XK92A1_
 Ej: _vendí el Datejust verde a Luis en 8,500 dólares_
 Ej: _¿qué relojes tengo?_ / _¿cuánto gané este mes?_`;
 
@@ -146,7 +146,7 @@ async function responderComando(comando, persona) {
       for (const r of stock) inv[r.moneda_costo] = (inv[r.moneda_costo] || 0) + (r.costo || 0);
       const lineas = stock
         .slice(0, 30)
-        .map((r) => `• *${r.id}* ${r.modelo}${r.numero_serie ? ` (${r.numero_serie})` : ''} – ${dinero(r.costo || 0, r.moneda_costo)}`)
+        .map((r) => `• *${r.id}* ${r.modelo}${r.anio ? ` ${r.anio}` : ''}${r.numero_serie ? ` (${r.numero_serie})` : ''} – ${dinero(r.costo || 0, r.moneda_costo)}`)
         .join('\n');
       const invertido = Object.entries(inv).map(([m, v]) => dinero(v, m)).join(' + ');
       return `⌚ *Inventario: ${stock.length} relojes*\nInvertido: *${invertido}*\n\n${lineas}${stock.length > 30 ? '\n…' : ''}`;

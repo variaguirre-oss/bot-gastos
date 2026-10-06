@@ -17,8 +17,9 @@ const ctx = { inv, persona: 'Alvaro', ahora: '2026-10-06 13:20' };
 const run = (n, i, c = ctx) => ejecutarInventario(n, i, c);
 
 // 1) Compras
-let r = await run('registrar_compra_reloj', { modelo: 'Rolex Datejust 36 verde', numero_serie: '7XK92A1', costo: 120000, moneda: 'MXN', proveedor: 'Pedro' });
+let r = await run('registrar_compra_reloj', { modelo: 'Rolex Datejust 36 verde', anio: 2019, numero_serie: '7XK92A1', costo: 120000, moneda: 'MXN', proveedor: 'Pedro' });
 assert.equal(r.ok, true);
+assert.equal(r.registrado.anio, '2019');
 assert.equal(r.registrado.id, 'R-0001');
 assert.equal(r.registrado.estado, 'en inventario');
 assert.equal(r.registrado.fecha_compra, '2026-10-06');
@@ -74,6 +75,8 @@ assert.deepEqual(r.resumen.ventas, { MXN: 260000 });
 assert.deepEqual(r.resumen.ganancia, { MXN: 43800 });
 r = await run('buscar_relojes', { estado: 'vendido', desde: '2026-10-06' });
 assert.equal(r.relojes.length, 1);
+r = await run('buscar_relojes', { texto: '2019' });
+assert.equal(r.relojes[0].id, 'R-0001');
 r = await run('buscar_relojes', { texto: 'speedmaster' });
 assert.equal(r.relojes[0].id, 'R-0002');
 r = await run('buscar_relojes', { cliente: 'ana' });
@@ -83,6 +86,8 @@ console.log('✓ búsquedas y resumen', JSON.stringify(r.resumen.ganancia));
 // 8) Corregir precio recalcula ganancia; cancelar venta; borrar
 r = await run('corregir_reloj', { id: 'R-0001', campo: 'precio_venta', valor: '$155,000' });
 assert.equal(r.ahora.ganancia, 35000);
+r = await run('corregir_reloj', { id: 'R-0002', campo: 'anio', valor: 'aprox. 2015' });
+assert.equal(r.ahora.anio, 'aprox. 2015');
 r = await run('corregir_reloj', { id: 'R-0003', campo: 'numero_serie', valor: 'OM555' });
 assert.match(r.error, /otro reloj/);
 r = await run('cancelar_venta_reloj', { id: 'R-0002' });
