@@ -67,6 +67,19 @@ function leerCategoria(token) {
 }
 
 /**
+ * ¿El mensaje está en el formato rápido? ("250 comida tacos", "$85 uber", "comida 300 pizza")
+ * Si no, se le pasa a la IA para entender lenguaje natural.
+ */
+export function esFormatoRapido(mensaje) {
+  const texto = (mensaje || '').trim();
+  if (!texto || texto.includes('?') || texto.includes('¿')) return false;
+  const tokens = texto.split(/\s+/);
+  if (tokens.length > 6) return false;
+  if (leerMonto(tokens[0]) !== null) return true;
+  return tokens.length > 1 && leerCategoria(tokens[0]) !== null && leerMonto(tokens[1]) !== null;
+}
+
+/**
  * Devuelve uno de:
  *   { tipo: 'gasto', monto, categoria, descripcion }
  *   { tipo: 'comando', comando }

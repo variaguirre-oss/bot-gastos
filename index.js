@@ -1,8 +1,9 @@
 // Bot de WhatsApp para control de gastos familiares.
 import 'dotenv/config';
 import express from 'express';
-import { interpretar, CATEGORIAS } from './parser.js';
-import { prepararHoja, agregarGasto, leerGastos, borrarFila } from './sheets.js';
+import { interpretar, esFormatoRapido, CATEGORIAS } from './parser.js';
+import { prepararHoja, agregarGasto, leerGastos, borrarFila, actualizarCampo } from './sheets.js';
+import { conversar, iaDisponible } from './ai.js';
 
 const {
   WHATSAPP_TOKEN,
@@ -62,9 +63,9 @@ const dinero = (n) =>
   '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // ---------- Respuestas ----------
-const AYUDA = `*Bot de gastos* 💰
+const AYUDA_BASE = `*Bot de gastos* 💰
 
-*Registrar un gasto:*
+*Registro rápido:*
 monto categoría descripción
 Ej: _250 comida tacos_
 Ej: _1200 super despensa semanal_
@@ -76,6 +77,16 @@ Ej: _85 uber_
 • *hoy* – gastos de hoy
 • *borrar* – elimina tu último gasto
 • *categorias* – ver categorías`;
+
+const AYUDA_IA = `
+
+*También puedes escribirme normal* 🤖
+Ej: _ayer gasté 480 en el súper_
+Ej: _¿cuánto llevamos en comida este mes?_
+Ej: _¿quién ha gastado más esta semana?_
+Ej: _el último no era comida, era transporte_`;
+
+const ayuda = () => AYUDA_BASE + (iaDisponible() ? AYUDA_IA : '');
 
 function resumir(gastos, titulo) {
   if (gastos.length === 0) return `*${titulo}*\nNo hay gastos registrados.`;
@@ -107,7 +118,7 @@ ${porPersona}`;
 async function responderComando(comando, persona) {
   switch (comando) {
     case 'ayuda':
-      return AYUDA;
+      return ayuda();
     case 'categorias':
       return `*Categorías:*\n${CATEGORIAS.map((c) => `• ${c}`).join('\n')}\n\nSi no pones categoría, se guarda como _otros_.`;
     case 'hoy': {
@@ -133,7 +144,7 @@ async function responderComando(comando, persona) {
       }`;
     }
     default:
-      return AYUDA;
+      return ayuda();
   }
 }
 
@@ -141,6 +152,24 @@ async function procesarMensaje(texto, persona) {
   const r = interpretar(texto);
 
   if (r.tipo === 'comando') return responderComando(r.comando, persona);
+
+  // Todo lo que no sea el formato rápido lo atiende la IA (si está configurada).
+  if (iaDisponible() && !(r.tipo === 'gasto' && esFormatoRapido(texto))) {
+    try {
+      return await conversar(texto, {
+        persona,
+        ahora: ahora(),
+        personas: [...usuarios.values()],
+        datos: { leerGastos, agregarGasto, actualizarCampo, borrarFila },
+      });
+    } catch (err) {
+      console.error('Error con la IA:', err?.status, err?.message);
+      if (r.tipo !== 'gasto') {
+        return 'Ahorita no pude pensar bien 😅. Intenta de nuevo en un momento, o usa el formato rápido: _250 comida tacos_.';
+      }
+      // Si la IA falla pero parece un gasto, se registra con el método básico.
+    }
+  }
 
   if (r.tipo === 'gasto') {
     await agregarGasto({
@@ -237,6 +266,7 @@ prepararHoja()
     app.listen(PORT, () => {
       console.log(`Bot escuchando en el puerto ${PORT}`);
       console.log(`Usuarios autorizados: ${[...usuarios.values()].join(', ') || '(ninguno)'}`);
+      console.log(`IA: ${iaDisponible() ? 'activada' : 'desactivada (falta ANTHROPIC_API_KEY)'}`);
     });
   })
   .catch((err) => {

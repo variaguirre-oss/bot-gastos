@@ -79,6 +79,19 @@ export async function leerGastos() {
     .filter((g) => g.fecha);
 }
 
+// Cambia un campo de un gasto existente.
+const COLUMNAS = { fecha: 'A', persona: 'B', monto: 'C', categoria: 'D', descripcion: 'E' };
+export async function actualizarCampo(numeroFila, campo, valor) {
+  const col = COLUMNAS[campo];
+  if (!col) throw new Error(`Campo desconocido: ${campo}`);
+  await api().spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID(),
+    range: `${HOJA}!${col}${numeroFila}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[valor]] },
+  });
+}
+
 export async function borrarFila(numeroFila) {
   if (sheetIdNumerico === null) await prepararHoja();
   await api().spreadsheets.batchUpdate({
