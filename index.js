@@ -4,6 +4,7 @@ import express from 'express';
 import { interpretar, esFormatoRapido, CATEGORIAS } from './parser.js';
 import { prepararHoja, agregarGasto, leerGastos, borrarFila, actualizarCampo } from './sheets.js';
 import { conversar, iaDisponible } from './ai.js';
+import * as inventario from './inventario.js';
 
 const {
   WHATSAPP_TOKEN,
@@ -87,7 +88,8 @@ Ej: _61.73 usd labels datejust_ (dólares)
 • *semana* – gastos de esta semana
 • *hoy* – gastos de hoy
 • *borrar* – elimina tu último gasto
-• *categorias* – ver categorías`;
+• *categorias* – ver categorías
+• *inventario* – relojes en existencia`;
 
 const AYUDA_IA = `
 
@@ -95,7 +97,12 @@ const AYUDA_IA = `
 Ej: _ayer gasté 480 en el súper_
 Ej: _¿cuánto llevamos en comida este mes?_
 Ej: _¿quién ha gastado más esta semana?_
-Ej: _el último no era comida, era transporte_`;
+Ej: _el último no era comida, era transporte_
+
+*Inventario de relojes* ⌚
+Ej: _compré un Datejust 36 verde a Pedro en 120 mil pesos, serie 7XK92A1_
+Ej: _vendí el Datejust verde a Luis en 8,500 dólares_
+Ej: _¿qué relojes tengo?_ / _¿cuánto gané este mes?_`;
 
 const ayuda = () => AYUDA_BASE + (iaDisponible() ? AYUDA_IA : '');
 
@@ -131,6 +138,19 @@ async function responderComando(comando, persona) {
   switch (comando) {
     case 'ayuda':
       return ayuda();
+    case 'inventario': {
+      const relojes = await inventario.leerRelojes();
+      const stock = relojes.filter((r) => r.estado === inventario.EN_INVENTARIO);
+      if (stock.length === 0) return '⌚ No hay relojes en inventario.';
+      const inv = {};
+      for (const r of stock) inv[r.moneda_costo] = (inv[r.moneda_costo] || 0) + (r.costo || 0);
+      const lineas = stock
+        .slice(0, 30)
+        .map((r) => `• *${r.id}* ${r.modelo}${r.numero_serie ? ` (${r.numero_serie})` : ''} – ${dinero(r.costo || 0, r.moneda_costo)}`)
+        .join('\n');
+      const invertido = Object.entries(inv).map(([m, v]) => dinero(v, m)).join(' + ');
+      return `⌚ *Inventario: ${stock.length} relojes*\nInvertido: *${invertido}*\n\n${lineas}${stock.length > 30 ? '\n…' : ''}`;
+    }
     case 'categorias': {
       const usadas = (await leerGastos()).map((g) => g.categoria).filter(Boolean);
       const todas = [...new Set([...usadas, ...CATEGORIAS])];
@@ -176,6 +196,7 @@ async function procesarMensaje(texto, persona) {
         ahora: ahora(),
         personas: [...usuarios.values()],
         datos: { leerGastos, agregarGasto, actualizarCampo, borrarFila },
+        inv: inventario,
       });
     } catch (err) {
       console.error('Error con la IA:', err?.status, err?.message);
@@ -285,7 +306,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-prepararHoja()
+Promise.all([prepararHoja(), inventario.prepararInventario()])
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Bot escuchando en el puerto ${PORT}`);

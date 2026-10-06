@@ -110,6 +110,9 @@ export function interpretar(mensaje) {
     borrar: 'borrar',
     deshacer: 'borrar',
     categorias: 'categorias',
+    inventario: 'inventario',
+    stock: 'inventario',
+    relojes: 'inventario',
   };
   if (comandos[texto]) return { tipo: 'comando', comando: comandos[texto] };
 

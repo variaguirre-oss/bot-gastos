@@ -1,9 +1,10 @@
 // Conversación con IA (Claude) para registrar y consultar gastos en lenguaje natural.
 import Anthropic from '@anthropic-ai/sdk';
 import { CATEGORIAS } from './parser.js';
+import { HERRAMIENTAS_INVENTARIO, INSTRUCCIONES_INVENTARIO, ejecutarInventario } from './inventario-ia.js';
 
 const MODELO = process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
-const MAX_PASOS = 6; // vueltas máximas de herramientas por mensaje
+const MAX_PASOS = 8; // vueltas máximas de herramientas por mensaje
 const MAX_HISTORIAL = 12; // mensajes recordados por persona
 
 let cliente = null;
@@ -91,8 +92,11 @@ const HERRAMIENTAS = [
   },
 ];
 
-function instrucciones({ persona, ahora, personas, categorias }) {
-  return `Eres el asistente de gastos por WhatsApp de un pequeño negocio/sociedad en México. Hablas en español mexicano, amable y breve.
+const NOMBRES_INVENTARIO = new Set(HERRAMIENTAS_INVENTARIO.map((h) => h.name));
+const herramientas = (ctx) => (ctx.inv ? [...HERRAMIENTAS, ...HERRAMIENTAS_INVENTARIO] : HERRAMIENTAS);
+
+function instrucciones({ persona, ahora, personas, categorias, inv }) {
+  return `Eres el asistente por WhatsApp de un pequeño negocio/sociedad en México: llevas sus gastos${inv ? ' y su inventario de relojes' : ''}. Hablas en español mexicano, amable y breve.
 
 Hoy es ${ahora} (zona horaria de México). Te escribe: ${persona}.
 Personas que usan el bot: ${personas.join(', ')}.
@@ -110,7 +114,8 @@ Reglas:
 - NUNCA sumes ni compares pesos con dólares como si fueran lo mismo: buscar_gastos ya devuelve los totales separados por moneda; repórtalos por separado.
 - Si no está claro en qué moneda es un gasto, pregunta antes de registrarlo. Si el usuario ya te dijo la moneda en la conversación (ej. "son dólares"), úsala para toda esa lista.
 - Respuestas cortas, aptas para WhatsApp (usa *negritas* con un asterisco, sin tablas ni markdown de títulos).
-- Si preguntan algo que no tiene que ver con gastos, responde brevemente y recuerda en qué puedes ayudar.`;
+- Si preguntan algo que no tiene que ver con gastos${inv ? ' ni inventario' : ''}, responde brevemente y recuerda en qué puedes ayudar.
+${inv ? INSTRUCCIONES_INVENTARIO : ''}`;
 }
 
 function filtrar(gastos, { desde, hasta, persona, categoria, texto, moneda }) {
@@ -157,6 +162,10 @@ const esFecha = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '');
 
 async function ejecutar(nombre, input, ctx) {
   const { datos, persona, ahora } = ctx;
+  if (NOMBRES_INVENTARIO.has(nombre)) {
+    if (!ctx.inv) return { error: 'El inventario no está configurado.' };
+    return ejecutarInventario(nombre, input, ctx);
+  }
   switch (nombre) {
     case 'registrar_gasto': {
       const monto = Number(input.monto);
@@ -244,9 +253,9 @@ export async function conversar(texto, ctx) {
   for (let paso = 0; paso < MAX_PASOS; paso++) {
     const r = await claude.messages.create({
       model: MODELO,
-      max_tokens: 1024,
+      max_tokens: 1500,
       system: sistema,
-      tools: HERRAMIENTAS,
+      tools: herramientas(ctx),
       messages: mensajes,
     });
 
