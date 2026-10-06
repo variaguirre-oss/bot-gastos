@@ -59,8 +59,18 @@ function inicioSemanaStr() {
   return fecha.toISOString().slice(0, 10);
 }
 
-const dinero = (n) =>
-  '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const dinero = (n, moneda = 'MXN') =>
+  (moneda === 'USD' ? 'US$' : '$') +
+  n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Suma por moneda: "US$350.12 + $1,200.00"
+function totalesPorMoneda(gastos) {
+  const m = {};
+  for (const g of gastos) m[g.moneda || 'MXN'] = (m[g.moneda || 'MXN'] || 0) + g.monto;
+  return Object.entries(m)
+    .map(([mon, v]) => dinero(v, mon))
+    .join(' + ');
+}
 
 // ---------- Respuestas ----------
 const AYUDA_BASE = `*Bot de gastos* 💰
@@ -70,6 +80,7 @@ monto categoría descripción
 Ej: _250 comida tacos_
 Ej: _1200 super despensa semanal_
 Ej: _85 uber_
+Ej: _61.73 usd labels datejust_ (dólares)
 
 *Comandos:*
 • *resumen* – gastos del mes
@@ -91,22 +102,23 @@ const ayuda = () => AYUDA_BASE + (iaDisponible() ? AYUDA_IA : '');
 function resumir(gastos, titulo) {
   if (gastos.length === 0) return `*${titulo}*\nNo hay gastos registrados.`;
 
-  const total = gastos.reduce((s, g) => s + g.monto, 0);
+  // Agrupa por clave, sin mezclar monedas.
   const sumar = (clave) => {
-    const m = new Map();
-    for (const g of gastos) m.set(g[clave], (m.get(g[clave]) || 0) + g.monto);
-    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+    const grupos = new Map();
+    for (const g of gastos) {
+      if (!grupos.has(g[clave])) grupos.set(g[clave], []);
+      grupos.get(g[clave]).push(g);
+    }
+    return [...grupos.entries()]
+      .sort((a, b) => b[1].length - a[1].length)
+      .map(([k, lista]) => `• ${k}: ${totalesPorMoneda(lista)}`)
+      .join('\n');
   };
-
-  const porCategoria = sumar('categoria')
-    .map(([c, v]) => `• ${c}: ${dinero(v)}`)
-    .join('\n');
-  const porPersona = sumar('persona')
-    .map(([p, v]) => `• ${p}: ${dinero(v)}`)
-    .join('\n');
+  const porCategoria = sumar('categoria');
+  const porPersona = sumar('persona');
 
   return `*${titulo}*
-Total: *${dinero(total)}* (${gastos.length} gastos)
+Total: *${totalesPorMoneda(gastos)}* (${gastos.length} gastos)
 
 *Por categoría:*
 ${porCategoria}
@@ -142,7 +154,7 @@ async function responderComando(comando, persona) {
       const ultimo = [...gastos].reverse().find((g) => g.persona === persona);
       if (!ultimo) return 'No tienes gastos para borrar.';
       await borrarFila(ultimo.fila);
-      return `🗑️ Borrado: ${dinero(ultimo.monto)} en ${ultimo.categoria}${
+      return `🗑️ Borrado: ${dinero(ultimo.monto, ultimo.moneda)} en ${ultimo.categoria}${
         ultimo.descripcion ? ` (${ultimo.descripcion})` : ''
       }`;
     }
@@ -190,12 +202,12 @@ async function procesarMensaje(texto, persona) {
       monto: r.monto,
       categoria: r.categoria,
       descripcion: r.descripcion,
+      moneda: r.moneda,
     });
     const gastosMes = (await leerGastos()).filter((g) => g.fecha.startsWith(mesStr()));
-    const totalMes = gastosMes.reduce((s, g) => s + g.monto, 0);
-    return `✅ Registrado: *${dinero(r.monto)}* en _${r.categoria}_${
+    return `✅ Registrado: *${dinero(r.monto, r.moneda)}* en _${r.categoria}_${
       r.descripcion ? ` (${r.descripcion})` : ''
-    }\nTotal del mes: ${dinero(totalMes)}`;
+    }\nTotal del mes: ${totalesPorMoneda(gastosMes)}`;
   }
 
   return 'No entendí 🤔. Escribe por ejemplo _250 comida tacos_, o *ayuda* para ver los comandos.';

@@ -52,8 +52,17 @@ export function normalizar(texto) {
     .trim();
 }
 
+// Palabras que indican moneda.
+const MONEDAS = {
+  usd: 'USD', dls: 'USD', dlls: 'USD', dll: 'USD', dolar: 'USD', dolares: 'USD', 'us$': 'USD',
+  mxn: 'MXN', pesos: 'MXN', peso: 'MXN', mn: 'MXN',
+};
+export function leerMoneda(token) {
+  return MONEDAS[normalizar(token || '').replace(/\.$/, '')] || null;
+}
+
 function leerMonto(token) {
-  const limpio = token.replace(/^\$/, '').replace(/,/g, '');
+  const limpio = token.replace(/^(us)?\$/i, '').replace(/(usd|mxn)$/i, '').replace(/,/g, '');
   if (!/^\d+(\.\d{1,2})?$/.test(limpio)) return null;
   const valor = Number(limpio);
   return valor > 0 ? valor : null;
@@ -109,7 +118,13 @@ export function interpretar(mensaje) {
   if (idxMonto === -1) return { tipo: 'desconocido' };
 
   const monto = leerMonto(tokens[idxMonto]);
-  const resto = tokens.filter((_, i) => i !== idxMonto);
+  let moneda = /^us\$|usd$/i.test(tokens[idxMonto]) ? 'USD' : /mxn$/i.test(tokens[idxMonto]) ? 'MXN' : null;
+  let resto = tokens.filter((_, i) => i !== idxMonto);
+  const idxMoneda = resto.findIndex((t) => leerMoneda(t));
+  if (idxMoneda !== -1) {
+    moneda = leerMoneda(resto[idxMoneda]);
+    resto = resto.filter((_, i) => i !== idxMoneda);
+  }
 
   let categoria = null;
   let idxCategoria = -1;
@@ -135,5 +150,6 @@ export function interpretar(mensaje) {
     monto,
     categoria: categoria || 'otros',
     descripcion,
+    moneda: moneda || process.env.MONEDA_DEFAULT || 'MXN',
   };
 }

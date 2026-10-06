@@ -30,7 +30,12 @@ const HERRAMIENTAS = [
     input_schema: {
       type: 'object',
       properties: {
-        monto: { type: 'number', description: 'Monto en pesos, positivo.' },
+        monto: { type: 'number', description: 'Monto positivo.' },
+        moneda: {
+          type: 'string',
+          enum: ['MXN', 'USD'],
+          description: 'MXN (pesos) o USD (dólares). Usa USD si el usuario dice dólares/usd/dls o si el contexto lo indica.',
+        },
         categoria: {
           type: 'string',
           description:
@@ -42,7 +47,7 @@ const HERRAMIENTAS = [
           description: 'Fecha del gasto YYYY-MM-DD. Omitir si fue hoy.',
         },
       },
-      required: ['monto', 'categoria', 'descripcion'],
+      required: ['monto', 'moneda', 'categoria', 'descripcion'],
     },
   },
   {
@@ -57,6 +62,7 @@ const HERRAMIENTAS = [
         persona: { type: 'string', description: 'Nombre de la persona, si se pregunta por alguien.' },
         categoria: { type: 'string', description: 'Categoría exacta a filtrar.' },
         texto: { type: 'string', description: 'Palabra a buscar en la descripción.' },
+        moneda: { type: 'string', enum: ['MXN', 'USD'], description: 'Filtrar por moneda (opcional).' },
       },
     },
   },
@@ -67,7 +73,7 @@ const HERRAMIENTAS = [
       type: 'object',
       properties: {
         id: { type: 'integer' },
-        campo: { type: 'string', enum: ['monto', 'categoria', 'descripcion', 'fecha'] },
+        campo: { type: 'string', enum: ['monto', 'categoria', 'descripcion', 'fecha', 'moneda'] },
         valor: { type: 'string', description: 'Nuevo valor. Fecha en YYYY-MM-DD; categoría en minúsculas.' },
       },
       required: ['id', 'campo', 'valor'],
@@ -100,12 +106,14 @@ Reglas:
 - Si un encabezado agrupa renglones (ej. "Labels de Stellar"), incluye ese contexto en la descripción de cada gasto (ej. "datejust rosa (Stellar)").
 - Interpreta fechas relativas ("ayer", "el lunes", "la semana pasada", "septiembre") con base en la fecha de hoy. Las semanas empiezan en lunes.
 - Para corregir o borrar, primero busca el gasto para obtener su id. Si hay varios posibles, pregunta cuál.
-- Montos en pesos con formato $1,234.50.
+- Cada gasto tiene moneda: MXN (pesos) o USD (dólares). Formato: pesos $1,234.50 y dólares US$61.73.
+- NUNCA sumes ni compares pesos con dólares como si fueran lo mismo: buscar_gastos ya devuelve los totales separados por moneda; repórtalos por separado.
+- Si no está claro en qué moneda es un gasto, pregunta antes de registrarlo. Si el usuario ya te dijo la moneda en la conversación (ej. "son dólares"), úsala para toda esa lista.
 - Respuestas cortas, aptas para WhatsApp (usa *negritas* con un asterisco, sin tablas ni markdown de títulos).
 - Si preguntan algo que no tiene que ver con gastos, responde brevemente y recuerda en qué puedes ayudar.`;
 }
 
-function filtrar(gastos, { desde, hasta, persona, categoria, texto }) {
+function filtrar(gastos, { desde, hasta, persona, categoria, texto, moneda }) {
   const norm = (s) =>
     String(s || '')
       .toLowerCase()
@@ -118,13 +126,25 @@ function filtrar(gastos, { desde, hasta, persona, categoria, texto }) {
     if (persona && !norm(g.persona).includes(norm(persona))) return false;
     if (categoria && norm(g.categoria) !== norm(categoria)) return false;
     if (texto && !norm(g.descripcion).includes(norm(texto))) return false;
+    if (moneda && (g.moneda || 'MXN') !== moneda) return false;
     return true;
   });
 }
 
+const r2 = (n) => Math.round(n * 100) / 100;
+// Totales agrupados por moneda: { MXN: {...}, USD: {...} }
 function totales(gastos, clave) {
   const m = {};
-  for (const g of gastos) m[g[clave]] = Math.round(((m[g[clave]] || 0) + g.monto) * 100) / 100;
+  for (const g of gastos) {
+    const mon = g.moneda || 'MXN';
+    m[mon] ??= {};
+    m[mon][g[clave]] = r2((m[mon][g[clave]] || 0) + g.monto);
+  }
+  return m;
+}
+function totalPorMoneda(gastos) {
+  const m = {};
+  for (const g of gastos) m[g.moneda || 'MXN'] = r2((m[g.moneda || 'MXN'] || 0) + g.monto);
   return m;
 }
 
@@ -142,6 +162,7 @@ async function ejecutar(nombre, input, ctx) {
       const monto = Number(input.monto);
       if (!(monto > 0)) return { error: 'Monto inválido' };
       const categoria = limpiarCategoria(input.categoria);
+      const moneda = input.moneda === 'USD' ? 'USD' : 'MXN';
       const hoy = ahora.slice(0, 10);
       const fecha = esFecha(input.fecha) && input.fecha !== hoy ? `${input.fecha} 12:00` : ahora;
       await datos.agregarGasto({
@@ -150,23 +171,23 @@ async function ejecutar(nombre, input, ctx) {
         monto,
         categoria,
         descripcion: String(input.descripcion || '').slice(0, 200),
+        moneda,
       });
-      return { ok: true, registrado: { fecha: fecha.slice(0, 10), monto, categoria, descripcion: input.descripcion } };
+      return { ok: true, registrado: { fecha: fecha.slice(0, 10), monto, moneda, categoria, descripcion: input.descripcion } };
     }
     case 'buscar_gastos': {
       const todos = await datos.leerGastos();
       const lista = filtrar(todos, input);
-      const total = Math.round(lista.reduce((s, g) => s + g.monto, 0) * 100) / 100;
       return {
         cantidad: lista.length,
-        total,
+        total_por_moneda: totalPorMoneda(lista),
         por_categoria: totales(lista, 'categoria'),
         por_persona: totales(lista, 'persona'),
         // Los más recientes primero; se limita para no saturar.
         gastos: lista
           .slice(-40)
           .reverse()
-          .map((g) => ({ id: g.fila, fecha: g.fecha, persona: g.persona, monto: g.monto, categoria: g.categoria, descripcion: g.descripcion })),
+          .map((g) => ({ id: g.fila, fecha: g.fecha, persona: g.persona, monto: g.monto, moneda: g.moneda || 'MXN', categoria: g.categoria, descripcion: g.descripcion })),
         nota: lista.length > 40 ? 'Lista recortada a los 40 más recientes; los totales sí incluyen todos.' : undefined,
       };
     }
@@ -178,6 +199,10 @@ async function ejecutar(nombre, input, ctx) {
       if (input.campo === 'monto') {
         valor = Number(String(valor).replace(/[$,]/g, ''));
         if (!(valor > 0)) return { error: 'Monto inválido' };
+      }
+      if (input.campo === 'moneda') {
+        valor = String(valor).toUpperCase();
+        if (!['MXN', 'USD'].includes(valor)) return { error: 'Moneda debe ser MXN o USD' };
       }
       if (input.campo === 'categoria') {
         valor = limpiarCategoria(valor);
