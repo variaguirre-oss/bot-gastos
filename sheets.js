@@ -1,5 +1,6 @@
 // Lectura y escritura de gastos en Google Sheets.
 import { google } from 'googleapis';
+import { aplicarFormato } from './formato.js';
 
 const HOJA = process.env.SHEET_TAB || 'Gastos';
 const ENCABEZADOS = ['Fecha', 'Persona', 'Monto', 'Categoría', 'Descripción', 'Moneda'];
@@ -49,6 +50,9 @@ export async function prepararHoja() {
       requestBody: { values: [ENCABEZADOS] },
     });
   }
+
+  // Columna Monto (C) con "$".
+  await aplicarFormato(sheets, SPREADSHEET_ID(), sheetIdNumerico, { dinero: [2] });
 }
 
 export async function agregarGasto({ fecha, persona, monto, categoria, descripcion, moneda = 'MXN' }) {

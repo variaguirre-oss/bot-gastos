@@ -1,5 +1,6 @@
 // Inventario de relojes (una fila por pieza) en la pestaña "Inventario" de Google Sheets.
 import { google } from 'googleapis';
+import { aplicarFormato } from './formato.js';
 
 const HOJA = process.env.INVENTARIO_TAB || 'Inventario';
 
@@ -81,6 +82,13 @@ export async function prepararInventario() {
       requestBody: { values: [esperado] },
     });
   }
+
+  // Dinero con "$" y ganancia en verde/rojo.
+  const idx = (k) => CAMPOS.findIndex(([c]) => c === k);
+  await aplicarFormato(sheets, SPREADSHEET_ID(), sheetIdNumerico, {
+    dinero: [idx('costo'), idx('precio_venta'), idx('ganancia')],
+    semaforo: idx('ganancia'),
+  });
 }
 
 // Decide si hay que mover/insertar la columna "Año" para que quede junto a "Modelo".

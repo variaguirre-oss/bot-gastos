@@ -178,3 +178,18 @@ console.log('✓ corregir / cancelar venta / borrar');
 }
 
 console.log('\nInventario: todas las pruebas pasaron ✅');
+
+// 11) Formato: $ en dinero y semáforo en ganancia, sin duplicar reglas
+{
+  const { construirSolicitudes, aplicarFormato } = await import('./formato.js');
+  const i = (k) => CAMPOS.findIndex(([c]) => c === k);
+  const s1 = construirSolicitudes({ sheetId: 1, dinero: [i('costo'), i('precio_venta'), i('ganancia')], semaforo: i('ganancia') });
+  assert.equal(s1.length, 5);
+  assert.equal(s1[0].repeatCell.cell.userEnteredFormat.numberFormat.pattern, '"$"#,##0.00');
+  const reglas = s1.slice(3).map((x) => x.addConditionalFormatRule.rule);
+  assert.deepEqual(reglas.map((r) => r.booleanRule.condition.type), ['NUMBER_GREATER', 'NUMBER_LESS']);
+  assert.equal(construirSolicitudes({ sheetId: 1, dinero: [7], semaforo: 15, reglas }).length, 1);
+  // Si la API falla, no truena
+  await aplicarFormato({ spreadsheets: { get: async () => { throw new Error('sin red'); } } }, 'x', 1, { dinero: [1] });
+  console.log('✓ formato de dinero y colores');
+}
