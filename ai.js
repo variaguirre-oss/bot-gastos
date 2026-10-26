@@ -103,6 +103,8 @@ Personas que usan el bot: ${personas.join(', ')}.
 Categorías que ya existen: ${categorias.join(', ')}.
 
 Reglas:
+- REGLA MÁS IMPORTANTE: solo puedes decir que algo quedó registrado, vendido, corregido o borrado si en ESTE mensaje llamaste la herramienta correspondiente y devolvió "ok": true. Si devolvió error o necesita_tipo_cambio, dilo tal cual. Aunque en la conversación parezca que ya se hizo, si el usuario lo pide de nuevo, vuelve a llamar la herramienta.
+- Nunca describas un reloj o gasto de memoria: los datos (modelo, ID, precios) salen SOLO de lo que devuelven las herramientas en este mensaje.
 - NUNCA inventes cifras. Para cualquier total, suma o comparación usa buscar_gastos y reporta los números que devuelve.
 - Si el usuario dice que gastó algo, regístralo con registrar_gasto. Si el monto no está claro, pregunta antes de registrar.
 - Las categorías son libres: si el usuario indica una categoría (aunque no exista), úsala en minúsculas sin cuestionarla. Si no indica ninguna, elige la existente que mejor encaje.
@@ -235,6 +237,45 @@ async function ejecutar(nombre, input, ctx) {
   }
 }
 
+const ESCRITURAS = new Set([
+  'registrar_gasto', 'corregir_gasto', 'borrar_gasto',
+  'registrar_compra_reloj', 'registrar_venta_reloj', 'corregir_reloj', 'cancelar_venta_reloj', 'borrar_reloj',
+]);
+const fmt = (n, m) =>
+  n == null || n === '' ? '' : (m === 'USD' ? 'US$' : '$') + Number(n).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Texto corto y fiel de lo que REALMENTE se guardó en la hoja.
+export function describirEscritura(nombre, input, s) {
+  switch (nombre) {
+    case 'registrar_gasto':
+      return `Gasto ${fmt(s.registrado.monto, s.registrado.moneda)} en ${s.registrado.categoria} (${s.registrado.descripcion || ''})`;
+    case 'corregir_gasto':
+      return `Gasto corregido: ${s.campo} → ${s.nuevo_valor}`;
+    case 'borrar_gasto':
+      return `Gasto borrado: ${fmt(s.borrado.monto, s.borrado.moneda)} ${s.borrado.descripcion || ''}`;
+    case 'registrar_compra_reloj': {
+      const r = s.registrado;
+      return `${r.id} dado de alta: ${r.modelo}${r.anio ? ` ${r.anio}` : ''}, costo ${fmt(r.costo, r.moneda_costo)}`;
+    }
+    case 'registrar_venta_reloj': {
+      const r = s.vendido;
+      const g = r.ganancia != null ? `, ganancia ${fmt(r.ganancia, r.moneda_ganancia)}` : '';
+      return `${r.id} (${r.modelo}) vendido a ${r.cliente} en ${fmt(r.precio_venta, r.moneda_venta)}${g}`;
+    }
+    case 'corregir_reloj':
+      return `${s.ahora.id} corregido: ${input.campo} → ${s.ahora[input.campo] ?? input.valor}`;
+    case 'cancelar_venta_reloj':
+      return `${s.ahora.id} vuelve a estar en inventario (venta cancelada)`;
+    case 'borrar_reloj':
+      return `${s.borrado.id} (${s.borrado.modelo}) eliminado`;
+    default:
+      return nombre;
+  }
+}
+
+// ¿La respuesta afirma que se guardó algo?
+const AFIRMA_GUARDADO = /✅|registrad[oa]s?\b|ya (est[aá]|qued[oó])|guardad[oa]|anotad[oa]|actualizad[oa]|qued[oó] (vendid|registrad)|vendid[oa] a\b|en el sheet|en la hoja/i;
+
 /**
  * Responde un mensaje libre usando Claude.
  * ctx = { persona, ahora: 'YYYY-MM-DD HH:MM', personas: [...], datos: {leerGastos, agregarGasto, actualizarCampo, borrarFila}, cliente? }
@@ -249,6 +290,8 @@ export async function conversar(texto, ctx) {
   } catch {}
   const categorias = [...new Set([...CATEGORIAS, ...existentes.filter(Boolean)])];
   const sistema = instrucciones({ ...ctx, categorias });
+  const escrituras = []; // lo que de verdad se guardó en este mensaje
+  const fallos = [];
 
   for (let paso = 0; paso < MAX_PASOS; paso++) {
     const r = await claude.messages.create({
@@ -262,12 +305,21 @@ export async function conversar(texto, ctx) {
     mensajes.push({ role: 'assistant', content: r.content });
 
     if (r.stop_reason !== 'tool_use') {
-      const respuesta =
+      let respuesta =
         r.content
           .filter((b) => b.type === 'text')
           .map((b) => b.text)
           .join('\n')
           .trim() || 'Listo.';
+      // El servidor, no la IA, confirma lo que quedó en la hoja.
+      if (escrituras.length) {
+        respuesta += `\n\n📝 *Guardado en la hoja:*\n${escrituras.map((e) => `• ${e}`).join('\n')}`;
+      } else if (AFIRMA_GUARDADO.test(respuesta)) {
+        console.warn('IA afirmó guardar sin escribir nada:', JSON.stringify(texto).slice(0, 200));
+        respuesta += `\n\n⚠️ *Ojo: en este mensaje NO se guardó ningún cambio en la hoja.*${
+          fallos.length ? `\nMotivo: ${fallos.join('; ')}` : ''
+        }\nPídemelo de nuevo con los datos y lo registro.`;
+      }
       hist.push({ role: 'user', content: texto }, { role: 'assistant', content: respuesta });
       while (hist.length > MAX_HISTORIAL) hist.splice(0, 2);
       return respuesta;
@@ -282,6 +334,19 @@ export async function conversar(texto, ctx) {
       } catch (e) {
         console.error('Error en herramienta', b.name, e);
         salida = { error: 'Falló la operación con la hoja de cálculo.' };
+      }
+      const estado = salida?.ok ? 'ok' : salida?.error ? `error: ${salida.error}` : salida?.necesita_tipo_cambio ? 'pide tipo de cambio' : 'consulta';
+      console.log(`[${ctx.persona}] ${b.name} ${JSON.stringify(b.input).slice(0, 150)} → ${estado}`);
+      if (ESCRITURAS.has(b.name)) {
+        if (salida?.ok) {
+          try {
+            escrituras.push(describirEscritura(b.name, b.input, salida));
+          } catch {
+            escrituras.push(b.name);
+          }
+        } else if (salida?.error) {
+          fallos.push(salida.error);
+        }
       }
       resultados.push({ type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(salida) });
     }

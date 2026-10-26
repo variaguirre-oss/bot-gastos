@@ -133,4 +133,48 @@ console.log('✓ corregir / cancelar venta / borrar');
   console.log('✓ integración con la IA');
 }
 
+// 10) Lo que pasó en producción: la IA dice "vendido" sin llamar la herramienta
+{
+  const mk = (guion) => {
+    const llamadas = [];
+    return { llamadas, messages: { create: async (req) => { llamadas.push(JSON.parse(JSON.stringify(req))); return guion.shift(); } } };
+  };
+  const datos = { leerGastos: async () => [], agregarGasto: async () => {}, actualizarCampo: async () => {}, borrarFila: async () => {} };
+  const base = { persona: 'Tester', ahora: '2026-10-26 15:50', personas: ['Tester'], datos, inv };
+  const antes = JSON.stringify(filas);
+
+  const c1 = mk([{ stop_reason: 'end_turn', content: [{ type: 'text', text: '✅ Listo, R-0001 vendido a Luis Tapia. Ya está en el sheet' }] }]);
+  const resp1 = await conversar('vendí el R-0001 a Luis Tapia en 370 mil', { ...base, cliente: c1 });
+  assert.match(resp1, /NO se guardó ningún cambio/);
+  assert.equal(JSON.stringify(filas), antes); // nada cambió
+  assert.match(c1.llamadas[0].system, /REGLA MÁS IMPORTANTE/);
+  console.log('✓ detecta confirmación falsa y avisa');
+
+  // Ahora sí la ejecuta: el servidor agrega la confirmación real
+  const c2 = mk([
+    { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'v', name: 'registrar_venta_reloj', input: { id: 'R-0002', cliente: 'Luis Tapia', precio: 6000, moneda: 'USD' } }] },
+    { stop_reason: 'end_turn', content: [{ type: 'text', text: '✅ Vendido.' }] },
+  ]);
+  const resp2 = await conversar('vuelve a registrarla', { ...base, cliente: c2 });
+  assert.match(resp2, /Guardado en la hoja:\*\n• R-0002 \(Omega Speedmaster\) vendido a Luis Tapia en US\$6,000\.00, ganancia US\$800\.00/);
+  assert.doesNotMatch(resp2, /NO se guardó/);
+  assert.equal(filas[1].estado, 'vendido');
+  console.log('✓ confirmación real del servidor:', resp2.split('\n').at(-1));
+
+  // Si la herramienta falla, se muestra el motivo
+  const c3 = mk([
+    { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'w', name: 'registrar_venta_reloj', input: { id: 'R-0002', cliente: 'X', precio: 1, moneda: 'USD' } }] },
+    { stop_reason: 'end_turn', content: [{ type: 'text', text: '✅ Registrado' }] },
+  ]);
+  const resp3 = await conversar('véndelo otra vez', { ...base, cliente: c3 });
+  assert.match(resp3, /NO se guardó[\s\S]*Motivo: Ese reloj ya está marcado como vendido/);
+  console.log('✓ muestra el motivo cuando falla');
+
+  // Una pregunta normal no lleva advertencia
+  const c4 = mk([{ stop_reason: 'end_turn', content: [{ type: 'text', text: '¿Qué reloj quieres vender?' }] }]);
+  const resp4 = await conversar('quiero vender uno', { ...base, cliente: c4 });
+  assert.equal(resp4, '¿Qué reloj quieres vender?');
+  console.log('✓ sin falsas alarmas en preguntas');
+}
+
 console.log('\nInventario: todas las pruebas pasaron ✅');
